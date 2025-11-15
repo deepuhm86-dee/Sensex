@@ -8,7 +8,7 @@ import pandas as pd
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 DHAN_API_KEY = os.getenv("DHAN_API_KEY")
-SYMBOL = "SENSEX"   # DhanHQ symbol for Sensex index
+SECURITY_ID = os.getenv("SENSEX_SECURITY_ID")  # e.g., "123456"
 DEBUG_MODE = False
 
 # === TELEGRAM ALERT ===
@@ -23,8 +23,15 @@ def send_telegram_message(message):
 
 # === FETCH SENSEX 5m CANDLES ===
 def get_sensex_candles():
-    url = f"https://api.dhan.co/v2/market/candles"
-    params = {"symbol": SYMBOL, "interval": "5m", "limit": 50}
+    today = datetime.now().strftime("%Y-%m-%d")
+    url = "https://api.dhan.co/market/v1/instruments/candles"
+    params = {
+        "securityId": SECURITY_ID,
+        "exchangeSegment": "BSE",
+        "interval": "5MIN",
+        "fromDate": today,
+        "toDate": today
+    }
     headers = {"Authorization": f"Bearer {DHAN_API_KEY}"}
     r = requests.get(url, params=params, headers=headers)
     return r.json().get("data", [])
@@ -38,7 +45,7 @@ def get_ema(candles, period=5):
 # === SIGNAL CHECK ===
 def check_signal(candle, ema):
     low = float(candle["low"])
-    if low > ema and low != ema:  # strictly above, not touching
+    if low > ema and low != ema:
         message = (
             f"🚀 SENSEX SELL Signal\n\n"
             f"Candle Time: {candle['time']}\n"
@@ -51,15 +58,18 @@ def check_signal(candle, ema):
         print("❌ No signal")
 
 # === MAIN LOOP ===
+def is_market_open():
+    now = datetime.now()
+    return (
+        now.weekday() < 5 and  # Mon–Fri
+        now.hour >= 9 and (now.hour < 15 or (now.hour == 15 and now.minute <= 15))
+    )
+
 if __name__ == "__main__":
     print("🚀 Bot started — monitoring SENSEX 5m candles...")
 
-    MARKET_START = datetime.now().replace(hour=9, minute=15, second=0, microsecond=0)
-    MARKET_END   = datetime.now().replace(hour=15, minute=15, second=0, microsecond=0)
-
     while True:
-        now = datetime.now()
-        if MARKET_START <= now <= MARKET_END:
+        if is_market_open():
             candles = get_sensex_candles()
             if candles:
                 ema5 = get_ema(candles)
@@ -67,4 +77,4 @@ if __name__ == "__main__":
                 check_signal(latest, ema5)
         else:
             print("⏱ Outside market hours")
-        time.sleep(300)  # wait 5 minutes
+        time.sleep(300)
