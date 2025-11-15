@@ -1,14 +1,15 @@
 import os
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 
 # === CONFIG ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-DHAN_API_KEY = os.getenv("DHAN_API_KEY")
-SECURITY_ID = os.getenv("SENSEX_SECURITY_ID")  # e.g., "123456"
+UPSTOX_API_KEY = os.getenv("UPSTOX_API_KEY")       # from Upstox developer portal
+UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")  # OAuth token after login
+SENSEX_KEY = "BSE_INDEX|SENSEX"                   # instrument key for SENSEX
 DEBUG_MODE = False
 
 # === TELEGRAM ALERT ===
@@ -23,33 +24,33 @@ def send_telegram_message(message):
 
 # === FETCH SENSEX 5m CANDLES ===
 def get_sensex_candles():
-    today = datetime.now().strftime("%Y-%m-%d")
-    url = "https://api.dhan.co/market/v1/instruments/candles"
+    url = f"https://api.upstox.com/v2/market/candle/intraday"
+    headers = {"Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}"}
     params = {
-        "securityId": SECURITY_ID,
-        "exchangeSegment": "BSE",
-        "interval": "5MIN",
-        "fromDate": today,
-        "toDate": today
+        "instrument_key": SENSEX_KEY,
+        "interval": "5minute"
     }
-    headers = {"Authorization": f"Bearer {DHAN_API_KEY}"}
-    r = requests.get(url, params=params, headers=headers)
-    return r.json().get("data", [])
+    r = requests.get(url, headers=headers, params=params)
+    data = r.json()
+    return data.get("data", [])
 
 # === EMA CALCULATION ===
 def get_ema(candles, period=5):
-    closes = [float(c["close"]) for c in candles]
+    closes = [float(c[4]) for c in candles]  # Upstox candle format: [timestamp, open, high, low, close, volume]
     df = pd.DataFrame(closes)
     return df.ewm(span=period, adjust=False).mean().iloc[-1][0]
 
 # === SIGNAL CHECK ===
 def check_signal(candle, ema):
-    low = float(candle["low"])
+    low = float(candle[3])   # low
+    close = float(candle[4]) # close
+    ts = candle[0]
+
     if low > ema and low != ema:
         message = (
             f"🚀 SENSEX SELL Signal\n\n"
-            f"Candle Time: {candle['time']}\n"
-            f"Low: {low}\nEMA5: {ema:.2f}"
+            f"Candle Time: {ts}\n"
+            f"Low: {low}\nClose: {close}\nEMA5: {ema:.2f}"
         )
         print("✅ Signal detected")
         if not DEBUG_MODE:
@@ -57,7 +58,7 @@ def check_signal(candle, ema):
     else:
         print("❌ No signal")
 
-# === MAIN LOOP ===
+# === MARKET HOURS CHECK ===
 def is_market_open():
     now = datetime.now()
     return (
@@ -65,8 +66,9 @@ def is_market_open():
         now.hour >= 9 and (now.hour < 15 or (now.hour == 15 and now.minute <= 15))
     )
 
+# === MAIN LOOP ===
 if __name__ == "__main__":
-    print("🚀 Bot started — monitoring SENSEX 5m candles...")
+    print("🚀 Bot started — monitoring SENSEX 5m candles via Upstox...")
 
     while True:
         if is_market_open():
@@ -77,4 +79,4 @@ if __name__ == "__main__":
                 check_signal(latest, ema5)
         else:
             print("⏱ Outside market hours")
-        time.sleep(300)
+        time.sleep(300)  # 5 minutes
