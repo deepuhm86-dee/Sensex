@@ -80,7 +80,8 @@ def is_market_open():
     now = datetime.now()
     return (
         now.weekday() < 5 and  # Mon–Fri
-        now.hour >= 9 and (now.hour < 15 or (now.hour == 15 and now.minute <= 15))
+        (now.hour > 9 or (now.hour == 9 and now.minute >= 20)) and  # start at 9:20
+        (now.hour < 15 or (now.hour == 15 and now.minute <= 15))    # stop at 15:15
     )
 
 # === MAIN LOOP ===
@@ -98,4 +99,3 @@ if __name__ == "__main__":
         else:
             print("⏱ Outside market hours")
         time.sleep(300)  # wait 5 minutes
-
