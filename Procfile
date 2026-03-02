@@ -1,1 +1,1 @@
-worker: python sensex_bot.py
+worker: python main.py
