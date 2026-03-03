@@ -15,7 +15,7 @@ EMA_PERIOD = 5
 DEBUG_MODE = False
 
 IST = pytz.timezone("Asia/Kolkata")
-last_signal_ts = None  # prevents duplicate alerts
+last_signal_ts = None
 
 # ================= SAFETY CHECK =================
 if not UPSTOX_ACCESS_TOKEN:
@@ -29,6 +29,7 @@ def send_telegram_message(message):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message
@@ -43,25 +44,32 @@ def send_telegram_message(message):
 # ================= FETCH CANDLES =================
 def get_sensex_candles():
     try:
-        url = "https://api.upstox.com/v2/market/candle/intraday"
+        url = "https://api.upstox.com/v2/market/candles/intraday"
+
         headers = {
-            "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}"
+            "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
+            "Accept": "application/json"
         }
+
         params = {
             "instrument_key": SENSEX_KEY,
             "interval": "5minute"
         }
 
         r = requests.get(url, headers=headers, params=params, timeout=10)
-        r.raise_for_status()
 
-        data = r.json().get("data", [])
-
-        if len(data) < 20:
-            print("Not enough candles for EMA")
+        if r.status_code != 200:
+            print("❌ API Error:", r.status_code, r.text)
             return []
 
-        return data[-20:]  # last 20 candles
+        data = r.json().get("data", {})
+        candles = data.get("candles", [])
+
+        if len(candles) < 20:
+            print("⚠ Not enough candles received")
+            return []
+
+        return candles[-20:]  # last 20 candles
 
     except Exception as e:
         print("⚠ Upstox API error:", e)
@@ -75,8 +83,7 @@ def calculate_ema(candles, period=EMA_PERIOD):
         df = pd.DataFrame(closes, columns=["close"])
         df["ema"] = df["close"].ewm(span=period, adjust=False).mean()
 
-        # Use EMA of last CLOSED candle
-        return float(df["ema"].iloc[-2])
+        return float(df["ema"].iloc[-2])  # last CLOSED candle EMA
 
     except Exception as e:
         print("EMA calculation error:", e)
@@ -99,7 +106,6 @@ def check_signal(candles, ema_value):
 
     print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} | EMA5:{ema_value:.2f}")
 
-    # ===== BUY CONDITION =====
     if ema_value and low > ema_value and ts_str != last_signal_ts:
 
         message = (
@@ -134,18 +140,9 @@ def sleep_until_next_5min():
     next_minute = (now.minute // 5 + 1) * 5
 
     if next_minute == 60:
-        next_time = now.replace(
-            hour=now.hour + 1,
-            minute=0,
-            second=5,
-            microsecond=0
-        )
+        next_time = now.replace(hour=now.hour + 1, minute=0, second=5, microsecond=0)
     else:
-        next_time = now.replace(
-            minute=next_minute,
-            second=5,
-            microsecond=0
-        )
+        next_time = now.replace(minute=next_minute, second=5, microsecond=0)
 
     sleep_seconds = (next_time - now).total_seconds()
 
@@ -155,7 +152,7 @@ def sleep_until_next_5min():
 
 # ================= MAIN LOOP =================
 if __name__ == "__main__":
-    print("🚀 SENSEX EMA5 Bot Started (Upstox 5m candles)...")
+    print("🚀 SENSEX EMA5 Bot Started (Upstox v2 5m candles)...")
 
     while True:
         try:
@@ -168,7 +165,7 @@ if __name__ == "__main__":
                     if ema5:
                         check_signal(candles, ema5)
                 else:
-                    print("No candle data received")
+                    print("⚠ No candle data received")
 
             else:
                 print("⏱ Outside market hours")
