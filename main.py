@@ -10,7 +10,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
-SENSEX_KEY = "BSE_INDEX|1"   # Sensex instrument key
+INSTRUMENT_KEY = "NSE_INDEX|Nifty 50"   # Working instrument
 EMA_PERIOD = 5
 DEBUG_MODE = False
 
@@ -42,11 +42,9 @@ def send_telegram_message(message):
         print("Telegram error:", e)
 
 # ================= FETCH CANDLES =================
-def get_sensex_candles():
+def get_candles():
     try:
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-
-        url = "https://api.upstox.com/v2/market/candles"
+        url = "https://api.upstox.com/v2/market/candles/intraday"
 
         headers = {
             "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
@@ -54,10 +52,8 @@ def get_sensex_candles():
         }
 
         params = {
-            "instrument_key": SENSEX_KEY,
-            "interval": "5minute",
-            "from_date": today,
-            "to_date": today
+            "instrument_key": INSTRUMENT_KEY,
+            "interval": "5minute"
         }
 
         r = requests.get(url, headers=headers, params=params, timeout=10)
@@ -110,11 +106,11 @@ def check_signal(candles, ema_value):
 
     print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} | EMA5:{ema_value:.2f}")
 
-    # ===== BUY CONDITION =====
+    # BUY CONDITION
     if ema_value is not None and low > ema_value and ts_str != last_signal_ts:
 
         message = (
-            f"🚀 SENSEX BUY Signal\n\n"
+            f"🚀 NIFTY BUY Signal\n\n"
             f"Candle Time: {ts_str}\n"
             f"Open: {open_price}\n"
             f"High: {high}\n"
@@ -144,18 +140,9 @@ def sleep_until_next_5min():
     next_minute = (now.minute // 5 + 1) * 5
 
     if next_minute == 60:
-        next_time = now.replace(
-            hour=now.hour + 1,
-            minute=0,
-            second=5,
-            microsecond=0
-        )
+        next_time = now.replace(hour=now.hour + 1, minute=0, second=5, microsecond=0)
     else:
-        next_time = now.replace(
-            minute=next_minute,
-            second=5,
-            microsecond=0
-        )
+        next_time = now.replace(minute=next_minute, second=5, microsecond=0)
 
     sleep_seconds = (next_time - now).total_seconds()
 
@@ -165,12 +152,12 @@ def sleep_until_next_5min():
 
 # ================= MAIN LOOP =================
 if __name__ == "__main__":
-    print("🚀 SENSEX EMA5 Bot Started (Upstox v2 5m candles)...")
+    print("🚀 NIFTY EMA5 Bot Started (Upstox v2 5m candles)...")
 
     while True:
         try:
             if is_market_open():
-                candles = get_sensex_candles()
+                candles = get_candles()
 
                 if candles:
                     ema5 = calculate_ema(candles)
@@ -187,3 +174,4 @@ if __name__ == "__main__":
             print("Main loop error:", e)
 
         sleep_until_next_5min()
+         
