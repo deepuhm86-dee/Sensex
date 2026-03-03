@@ -10,14 +10,13 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
-INSTRUMENT_KEY = "NSE_INDEX|Nifty 50"   # Working instrument
+INSTRUMENT_KEY = "NSE_INDEX|Nifty 50"
 EMA_PERIOD = 5
 DEBUG_MODE = False
 
 IST = pytz.timezone("Asia/Kolkata")
 last_signal_ts = None
 
-# ================= SAFETY CHECK =================
 if not UPSTOX_ACCESS_TOKEN:
     print("❌ Missing UPSTOX_ACCESS_TOKEN")
     exit()
@@ -29,22 +28,18 @@ def send_telegram_message(message):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message
-    }
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
 
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        print("📩 Telegram sent:", r.status_code)
+        requests.post(url, json=payload, timeout=10)
+        print("📩 Telegram sent")
     except Exception as e:
         print("Telegram error:", e)
 
-# ================= FETCH CANDLES =================
+# ================= FETCH CANDLES (v3) =================
 def get_candles():
     try:
-        url = "https://api.upstox.com/v2/market/candles/intraday"
+        url = "https://api.upstox.com/v3/market-quote/candles/intraday"
 
         headers = {
             "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
@@ -66,112 +61,76 @@ def get_candles():
         candles = data.get("candles", [])
 
         if len(candles) < 20:
-            print("⚠ Not enough candles received")
+            print("⚠ Not enough candles")
             return []
 
         return candles[-20:]
 
     except Exception as e:
-        print("⚠ Candle fetch error:", e)
+        print("⚠ Fetch error:", e)
         return []
 
-# ================= EMA CALCULATION =================
-def calculate_ema(candles, period=EMA_PERIOD):
-    try:
-        closes = [float(c[4]) for c in candles]
+# ================= EMA =================
+def calculate_ema(candles):
+    closes = [float(c[4]) for c in candles]
+    df = pd.DataFrame(closes, columns=["close"])
+    df["ema"] = df["close"].ewm(span=EMA_PERIOD, adjust=False).mean()
+    return float(df["ema"].iloc[-2])
 
-        df = pd.DataFrame(closes, columns=["close"])
-        df["ema"] = df["close"].ewm(span=period, adjust=False).mean()
-
-        return float(df["ema"].iloc[-2])  # EMA of last CLOSED candle
-
-    except Exception as e:
-        print("EMA calculation error:", e)
-        return None
-
-# ================= SIGNAL LOGIC =================
-def check_signal(candles, ema_value):
+# ================= SIGNAL =================
+def check_signal(candles, ema):
     global last_signal_ts
 
-    candle = candles[-2]  # last CLOSED candle
+    candle = candles[-2]
 
-    ts_utc = datetime.utcfromtimestamp(candle[0] / 1000).replace(tzinfo=pytz.utc)
-    ts_ist = ts_utc.astimezone(IST)
-    ts_str = ts_ist.strftime('%Y-%m-%d %H:%M')
+    ts = datetime.fromtimestamp(candle[0] / 1000, IST)
+    ts_str = ts.strftime("%Y-%m-%d %H:%M")
 
     open_price = float(candle[1])
     high = float(candle[2])
     low = float(candle[3])
     close = float(candle[4])
 
-    print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} | EMA5:{ema_value:.2f}")
+    print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close} EMA:{ema}")
 
-    # BUY CONDITION
-    if ema_value is not None and low > ema_value and ts_str != last_signal_ts:
+    if low > ema and ts_str != last_signal_ts:
 
         message = (
             f"🚀 NIFTY BUY Signal\n\n"
-            f"Candle Time: {ts_str}\n"
-            f"Open: {open_price}\n"
-            f"High: {high}\n"
-            f"Low: {low}\n"
-            f"Close: {close}\n"
-            f"EMA5: {ema_value:.2f}"
+            f"Candle: {ts_str}\n"
+            f"O:{open_price} H:{high} L:{low} C:{close}\n"
+            f"EMA5:{ema}"
         )
 
-        print("✅ BUY Signal detected")
+        print("✅ BUY SIGNAL")
 
         if not DEBUG_MODE:
             send_telegram_message(message)
 
         last_signal_ts = ts_str
-    else:
-        print("❌ No signal")
 
 # ================= MARKET HOURS =================
 def is_market_open():
     now = datetime.now(IST).time()
     return dt_time(9, 20) <= now <= dt_time(15, 15)
 
-# ================= 5-MIN ALIGNMENT =================
-def sleep_until_next_5min():
-    now = datetime.now(IST)
-
-    next_minute = (now.minute // 5 + 1) * 5
-
-    if next_minute == 60:
-        next_time = now.replace(hour=now.hour + 1, minute=0, second=5, microsecond=0)
-    else:
-        next_time = now.replace(minute=next_minute, second=5, microsecond=0)
-
-    sleep_seconds = (next_time - now).total_seconds()
-
-    if sleep_seconds > 0:
-        print(f"⏳ Sleeping {int(sleep_seconds)} sec until {next_time.strftime('%H:%M:%S')}")
-        time.sleep(sleep_seconds)
-
-# ================= MAIN LOOP =================
+# ================= LOOP =================
 if __name__ == "__main__":
-    print("🚀 NIFTY EMA5 Bot Started (Upstox v2 5m candles)...")
+    print("🚀 NIFTY EMA5 Bot Started (v3)...")
 
     while True:
         try:
             if is_market_open():
                 candles = get_candles()
-
                 if candles:
-                    ema5 = calculate_ema(candles)
-
-                    if ema5 is not None:
-                        check_signal(candles, ema5)
+                    ema = calculate_ema(candles)
+                    check_signal(candles, ema)
                 else:
-                    print("⚠ No candle data received")
-
+                    print("⚠ No data")
             else:
-                print("⏱ Outside market hours")
+                print("⏱ Market closed")
 
         except Exception as e:
-            print("Main loop error:", e)
+            print("Main error:", e)
 
-        sleep_until_next_5min()
-         
+        time.sleep(300)  # 5 minutes
