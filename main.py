@@ -10,7 +10,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
-SENSEX_KEY = "BSE_INDEX|1"
+SENSEX_KEY = "BSE_INDEX|1"   # Sensex instrument key
 EMA_PERIOD = 5
 DEBUG_MODE = False
 
@@ -44,7 +44,9 @@ def send_telegram_message(message):
 # ================= FETCH CANDLES =================
 def get_sensex_candles():
     try:
-        url = "https://api.upstox.com/v2/market/candles/intraday"
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+
+        url = "https://api.upstox.com/v2/market/candles"
 
         headers = {
             "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
@@ -53,7 +55,9 @@ def get_sensex_candles():
 
         params = {
             "instrument_key": SENSEX_KEY,
-            "interval": "5minute"
+            "interval": "5minute",
+            "from_date": today,
+            "to_date": today
         }
 
         r = requests.get(url, headers=headers, params=params, timeout=10)
@@ -69,10 +73,10 @@ def get_sensex_candles():
             print("⚠ Not enough candles received")
             return []
 
-        return candles[-20:]  # last 20 candles
+        return candles[-20:]
 
     except Exception as e:
-        print("⚠ Upstox API error:", e)
+        print("⚠ Candle fetch error:", e)
         return []
 
 # ================= EMA CALCULATION =================
@@ -83,7 +87,7 @@ def calculate_ema(candles, period=EMA_PERIOD):
         df = pd.DataFrame(closes, columns=["close"])
         df["ema"] = df["close"].ewm(span=period, adjust=False).mean()
 
-        return float(df["ema"].iloc[-2])  # last CLOSED candle EMA
+        return float(df["ema"].iloc[-2])  # EMA of last CLOSED candle
 
     except Exception as e:
         print("EMA calculation error:", e)
@@ -106,7 +110,8 @@ def check_signal(candles, ema_value):
 
     print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} | EMA5:{ema_value:.2f}")
 
-    if ema_value and low > ema_value and ts_str != last_signal_ts:
+    # ===== BUY CONDITION =====
+    if ema_value is not None and low > ema_value and ts_str != last_signal_ts:
 
         message = (
             f"🚀 SENSEX BUY Signal\n\n"
@@ -124,7 +129,6 @@ def check_signal(candles, ema_value):
             send_telegram_message(message)
 
         last_signal_ts = ts_str
-
     else:
         print("❌ No signal")
 
@@ -140,9 +144,18 @@ def sleep_until_next_5min():
     next_minute = (now.minute // 5 + 1) * 5
 
     if next_minute == 60:
-        next_time = now.replace(hour=now.hour + 1, minute=0, second=5, microsecond=0)
+        next_time = now.replace(
+            hour=now.hour + 1,
+            minute=0,
+            second=5,
+            microsecond=0
+        )
     else:
-        next_time = now.replace(minute=next_minute, second=5, microsecond=0)
+        next_time = now.replace(
+            minute=next_minute,
+            second=5,
+            microsecond=0
+        )
 
     sleep_seconds = (next_time - now).total_seconds()
 
@@ -162,7 +175,7 @@ if __name__ == "__main__":
                 if candles:
                     ema5 = calculate_ema(candles)
 
-                    if ema5:
+                    if ema5 is not None:
                         check_signal(candles, ema5)
                 else:
                     print("⚠ No candle data received")
