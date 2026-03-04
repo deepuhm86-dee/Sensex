@@ -65,21 +65,8 @@ def get_latest_candle():
 
     return candles[-(EMA_PERIOD+2):]  # last few candles for EMA
 
-# === LIVE QUOTE CHECK ===
-def get_live_quote():
-    url = f"https://api.upstox.com/v3/quote/instrument/{INSTRUMENT_KEY}"
-    headers = {
-        "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
-        "Accept": "application/json"
-    }
-    r = requests.get(url, headers=headers, timeout=10)
-    if r.status_code != 200:
-        print("⚠ Quote API error:", r.status_code)
-        return None
-    return r.json().get("data", {}).get("last_price")
-
 # === SIGNAL CHECK (SELL only) ===
-def check_signal(candle, ema, live_price):
+def check_signal(candle, ema):
     global last_signal_time
 
     ts = datetime.fromisoformat(candle[0])
@@ -87,19 +74,14 @@ def check_signal(candle, ema, live_price):
     low = float(candle[3])
     close = float(candle[4])
 
-    # Sanity check: skip if candle close is far from live price
-    if abs(close - live_price) > 500:
-        print(f"⚠ Skipping stale candle (close {close}, live {live_price})")
-        return
-
-    print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} EMA5:{ema:.2f} Live:{live_price:.2f}")
+    print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} EMA5:{ema:.2f}")
 
     # SELL condition only
     if low > ema + EPSILON and ts != last_signal_time:
         message = (
             f"🚀 ABOVE 5 EMA SELL Signal\n\n"
             f"Candle Time: {ts.strftime('%Y-%m-%d %H:%M')}\n"
-            f"H:{high} L:{low} C:{close}\nEMA5:{ema:.2f}\nLive:{live_price:.2f}"
+            f"H:{high} L:{low} C:{close}\nEMA5:{ema:.2f}"
         )
         print("✅ SELL Signal detected")
         if not DEBUG_MODE:
@@ -115,14 +97,13 @@ if __name__ == "__main__":
     while True:
         try:
             candles = get_latest_candle()
-            live_price = get_live_quote()
-            if candles and live_price:
+            if candles:
                 ema = get_ema(candles)
                 latest_candle = candles[-2]  # last closed candle
                 if ema:
-                    check_signal(latest_candle, ema, live_price)
+                    check_signal(latest_candle, ema)
             else:
-                print("⚠ No candle or live data")
+                print("⚠ No candle data")
         except Exception as e:
             print("Main error:", e)
 
