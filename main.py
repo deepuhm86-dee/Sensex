@@ -39,19 +39,15 @@ def send_telegram_message(message):
 # ================= FETCH CANDLES (v3) =================
 def get_candles():
     try:
-        url = "https://api.upstox.com/v3/market-quote/candles/intraday"
+        # Correct endpoint for intraday candles in Upstox v3
+        url = f"https://api.upstox.com/v3/historical-candle/intraday/{INSTRUMENT_KEY}/5minute"
 
         headers = {
             "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
             "Accept": "application/json"
         }
 
-        params = {
-            "instrument_key": INSTRUMENT_KEY,
-            "interval": "5minute"
-        }
-
-        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r = requests.get(url, headers=headers, timeout=10)
 
         if r.status_code != 200:
             print("❌ API Error:", r.status_code, r.text)
@@ -134,3 +130,5 @@ if __name__ == "__main__":
             print("Main error:", e)
 
         time.sleep(300)  # 5 minutes
+
+  
