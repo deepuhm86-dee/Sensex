@@ -1,135 +1,124 @@
 import os
 import requests
 import time
-from datetime import datetime, time as dt_time
+from datetime import datetime
 import pandas as pd
 import pytz
 
-# ================= CONFIG =================
+# === CONFIG ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
-# Confirm exact instrument key from instruments master file
-INSTRUMENT_KEY = "BSE_INDEX|SENSEX"   # Replace if needed
+INSTRUMENT_KEY = "BSE_INDEX|SENSEX"   # Confirm exact key from instruments file
 EMA_PERIOD = 5
+EPSILON = 0.0001
 DEBUG_MODE = False
 
 IST = pytz.timezone("Asia/Kolkata")
-last_signal_ts = None
+last_signal_times = {}
 
-if not UPSTOX_ACCESS_TOKEN:
-    print("❌ Missing UPSTOX_ACCESS_TOKEN")
-    exit()
-
-# ================= TELEGRAM =================
+# === TELEGRAM ALERT ===
 def send_telegram_message(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠ Telegram config missing")
         return
-
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-
     try:
-        requests.post(url, json=payload, timeout=10)
-        print("📩 Telegram sent")
+        r = requests.post(url, json=payload, timeout=10)
+        if r.status_code == 200:
+            print("📨 Telegram sent successfully")
+        else:
+            print(f"❌ Telegram error ({r.status_code}): {r.text}")
     except Exception as e:
-        print("Telegram error:", e)
+        print("Telegram exception:", e)
 
-# ================= FETCH CANDLES (v3) =================
-def get_candles():
-    try:
-        # V3 endpoint: unit=minutes, interval=5, to_date=today
-        to_date = datetime.now(IST).strftime("%Y-%m-%d")
-        url = f"https://api.upstox.com/v3/historical-candle/{INSTRUMENT_KEY}/minutes/5/{to_date}"
-
-        headers = {
-            "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
-            "Accept": "application/json"
-        }
-
-        r = requests.get(url, headers=headers, timeout=10)
-
-        if r.status_code != 200:
-            print("❌ API Error:", r.status_code, r.text)
-            return []
-
-        data = r.json().get("data", {})
-        candles = data.get("candles", [])
-
-        if len(candles) < 20:
-            print("⚠ Not enough candles")
-            return []
-
-        return candles[-20:]
-
-    except Exception as e:
-        print("⚠ Fetch error:", e)
-        return []
-
-# ================= EMA =================
-def calculate_ema(candles):
+# === EMA CALCULATION ===
+def get_ema(candles, period=EMA_PERIOD):
     closes = [float(c[4]) for c in candles]
+    if len(closes) < period + 1:
+        return None
     df = pd.DataFrame(closes, columns=["close"])
-    df["ema"] = df["close"].ewm(span=EMA_PERIOD, adjust=False).mean()
-    return float(df["ema"].iloc[-2])
+    ema = df["close"].ewm(span=period, adjust=False).mean().iloc[-2]
+    return float(ema)
 
-# ================= SIGNAL =================
-def check_signal(candles, ema):
-    global last_signal_ts
+# === FETCH LAST 5-MIN CANDLE ===
+def get_latest_candle():
+    to_date = datetime.now(IST).strftime("%Y-%m-%d")
+    url = f"https://api.upstox.com/v3/historical-candle/{INSTRUMENT_KEY}/minutes/5/{to_date}"
 
-    candle = candles[-2]
+    headers = {
+        "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
+        "Accept": "application/json"
+    }
 
-    # V3 returns ISO timestamps, not epoch
+    r = requests.get(url, headers=headers, timeout=10)
+    if r.status_code != 200:
+        print("❌ API Error:", r.status_code, r.text)
+        return None
+
+    candles = r.json().get("data", {}).get("candles", [])
+    if len(candles) < EMA_PERIOD + 2:
+        print("⚠ Not enough candles")
+        return None
+
+    # Return last N candles (for EMA calc) and the latest closed candle
+    return candles[-(EMA_PERIOD+2):]
+
+# === SIGNAL CHECK ===
+def check_signal(candle, ema):
+    global last_signal_times
+
     ts = datetime.fromisoformat(candle[0])
-    ts_str = ts.strftime("%Y-%m-%d %H:%M")
-
-    open_price = float(candle[1])
     high = float(candle[2])
     low = float(candle[3])
     close = float(candle[4])
 
-    print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close} EMA:{ema}")
+    print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} EMA5:{ema:.2f}")
 
-    if low > ema and ts_str != last_signal_ts:
-
+    # SELL
+    if low > ema + EPSILON and ts != last_signal_times.get("SELL"):
         message = (
-            f"🚀 SENSEX BUY Signal\n\n"
-            f"Candle: {ts_str}\n"
-            f"O:{open_price} H:{high} L:{low} C:{close}\n"
-            f"EMA5:{ema}"
+            f"🚀 ABOVE 5 EMA SELL Signal\n\n"
+            f"Candle Time: {ts.strftime('%Y-%m-%d %H:%M')}\n"
+            f"H:{high} L:{low} C:{close}\nEMA5:{ema:.2f}"
         )
-
-        print("✅ BUY SIGNAL")
-
+        print("✅ SELL Signal detected")
         if not DEBUG_MODE:
             send_telegram_message(message)
+        last_signal_times["SELL"] = ts
 
-        last_signal_ts = ts_str
+    # BUY
+    elif high < ema - EPSILON and ts != last_signal_times.get("BUY"):
+        message = (
+            f"🟢 BELOW 5 EMA BUY Signal\n\n"
+            f"Candle Time: {ts.strftime('%Y-%m-%d %H:%M')}\n"
+            f"H:{high} L:{low} C:{close}\nEMA5:{ema:.2f}"
+        )
+        print("✅ BUY Signal detected")
+        if not DEBUG_MODE:
+            send_telegram_message(message)
+        last_signal_times["BUY"] = ts
 
-# ================= MARKET HOURS =================
-def is_market_open():
-    now = datetime.now(IST).time()
-    return dt_time(9, 20) <= now <= dt_time(15, 15)
+    else:
+        print("❌ No signal")
 
-# ================= LOOP =================
+# === MAIN LOOP ===
 if __name__ == "__main__":
-    print("🚀 SENSEX EMA5 Bot Started (v3)...")
+    print("🚀 SENSEX EMA5 Bot Started (5m candles)...")
 
     while True:
         try:
-            if is_market_open():
-                candles = get_candles()
-                if candles:
-                    ema = calculate_ema(candles)
-                    check_signal(candles, ema)
-                else:
-                    print("⚠ No data")
+            candles = get_latest_candle()
+            if candles:
+                ema = get_ema(candles)
+                latest_candle = candles[-2]  # last closed candle
+                if ema:
+                    check_signal(latest_candle, ema)
             else:
-                print("⏱ Market closed")
-
+                print("⚠ No candle data")
         except Exception as e:
             print("Main error:", e)
 
-        time.sleep(300)  # 5 minutes
+        time.sleep(300)  # run every 5 minutes
