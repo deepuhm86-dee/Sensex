@@ -10,13 +10,13 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
-INSTRUMENT_KEY = "BSE_INDEX|SENSEX"   # Confirm exact key from instruments file
+INSTRUMENT_KEY = "BSE_INDEX|SENSEX"   # Confirmed key
 EMA_PERIOD = 5
 EPSILON = 0.0001
 DEBUG_MODE = False
 
 IST = pytz.timezone("Asia/Kolkata")
-last_signal_times = {}
+last_signal_time = None
 
 # === TELEGRAM ALERT ===
 def send_telegram_message(message):
@@ -78,9 +78,9 @@ def get_live_quote():
         return None
     return r.json().get("data", {}).get("last_price")
 
-# === SIGNAL CHECK ===
+# === SIGNAL CHECK (SELL only) ===
 def check_signal(candle, ema, live_price):
-    global last_signal_times
+    global last_signal_time
 
     ts = datetime.fromisoformat(candle[0])
     high = float(candle[2])
@@ -88,14 +88,14 @@ def check_signal(candle, ema, live_price):
     close = float(candle[4])
 
     # Sanity check: skip if candle close is far from live price
-    if abs(close - live_price) > 500:  # tolerance buffer
+    if abs(close - live_price) > 500:
         print(f"⚠ Skipping stale candle (close {close}, live {live_price})")
         return
 
     print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} EMA5:{ema:.2f} Live:{live_price:.2f}")
 
-    # SELL
-    if low > ema + EPSILON and ts != last_signal_times.get("SELL"):
+    # SELL condition only
+    if low > ema + EPSILON and ts != last_signal_time:
         message = (
             f"🚀 ABOVE 5 EMA SELL Signal\n\n"
             f"Candle Time: {ts.strftime('%Y-%m-%d %H:%M')}\n"
@@ -104,26 +104,13 @@ def check_signal(candle, ema, live_price):
         print("✅ SELL Signal detected")
         if not DEBUG_MODE:
             send_telegram_message(message)
-        last_signal_times["SELL"] = ts
-
-    # BUY
-    elif high < ema - EPSILON and ts != last_signal_times.get("BUY"):
-        message = (
-            f"🟢 BELOW 5 EMA BUY Signal\n\n"
-            f"Candle Time: {ts.strftime('%Y-%m-%d %H:%M')}\n"
-            f"H:{high} L:{low} C:{close}\nEMA5:{ema:.2f}\nLive:{live_price:.2f}"
-        )
-        print("✅ BUY Signal detected")
-        if not DEBUG_MODE:
-            send_telegram_message(message)
-        last_signal_times["BUY"] = ts
-
+        last_signal_time = ts
     else:
-        print("❌ No signal")
+        print("❌ No SELL signal")
 
 # === MAIN LOOP ===
 if __name__ == "__main__":
-    print("🚀 SENSEX EMA5 Bot Started (5m candles, live check)...")
+    print("🚀 SENSEX EMA5 Bot Started (5m candles, SELL only)...")
 
     while True:
         try:
