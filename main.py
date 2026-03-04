@@ -10,7 +10,8 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
-INSTRUMENT_KEY = "NSE_INDEX|Nifty 50"
+# Use the correct instrument key from the instruments master file
+INSTRUMENT_KEY = "BSE_INDEX|SENSEX"   # Replace with exact key if needed
 EMA_PERIOD = 5
 DEBUG_MODE = False
 
@@ -36,11 +37,11 @@ def send_telegram_message(message):
     except Exception as e:
         print("Telegram error:", e)
 
-# ================= FETCH CANDLES (v3) =================
+# ================= FETCH CANDLES (v2) =================
 def get_candles():
     try:
-        # Correct endpoint for intraday candles in Upstox v3
-        url = f"https://api.upstox.com/v3/historical-candle/intraday/{INSTRUMENT_KEY}/5minute"
+        # v2 intraday endpoint supports only 1minute or 30minute intervals
+        url = f"https://api.upstox.com/v2/historical-candle/intraday/{INSTRUMENT_KEY}/30minute"
 
         headers = {
             "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
@@ -92,7 +93,7 @@ def check_signal(candles, ema):
     if low > ema and ts_str != last_signal_ts:
 
         message = (
-            f"🚀 NIFTY BUY Signal\n\n"
+            f"🚀 SENSEX BUY Signal\n\n"
             f"Candle: {ts_str}\n"
             f"O:{open_price} H:{high} L:{low} C:{close}\n"
             f"EMA5:{ema}"
@@ -112,7 +113,7 @@ def is_market_open():
 
 # ================= LOOP =================
 if __name__ == "__main__":
-    print("🚀 NIFTY EMA5 Bot Started (v3)...")
+    print("🚀 SENSEX EMA5 Bot Started (v2)...")
 
     while True:
         try:
@@ -130,5 +131,3 @@ if __name__ == "__main__":
             print("Main error:", e)
 
         time.sleep(300)  # 5 minutes
-
-  
