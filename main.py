@@ -10,8 +10,8 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
-# Use the correct instrument key from the instruments master file
-INSTRUMENT_KEY = "BSE_INDEX|SENSEX"   # Replace with exact key if needed
+# Confirm exact instrument key from instruments master file
+INSTRUMENT_KEY = "BSE_INDEX|SENSEX"   # Replace if needed
 EMA_PERIOD = 5
 DEBUG_MODE = False
 
@@ -37,11 +37,12 @@ def send_telegram_message(message):
     except Exception as e:
         print("Telegram error:", e)
 
-# ================= FETCH CANDLES (v2) =================
+# ================= FETCH CANDLES (v3) =================
 def get_candles():
     try:
-        # v2 intraday endpoint supports only 1minute or 30minute intervals
-        url = f"https://api.upstox.com/v2/historical-candle/intraday/{INSTRUMENT_KEY}/30minute"
+        # V3 endpoint: unit=minutes, interval=5, to_date=today
+        to_date = datetime.now(IST).strftime("%Y-%m-%d")
+        url = f"https://api.upstox.com/v3/historical-candle/{INSTRUMENT_KEY}/minutes/5/{to_date}"
 
         headers = {
             "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
@@ -80,7 +81,8 @@ def check_signal(candles, ema):
 
     candle = candles[-2]
 
-    ts = datetime.fromtimestamp(candle[0] / 1000, IST)
+    # V3 returns ISO timestamps, not epoch
+    ts = datetime.fromisoformat(candle[0])
     ts_str = ts.strftime("%Y-%m-%d %H:%M")
 
     open_price = float(candle[1])
@@ -113,7 +115,7 @@ def is_market_open():
 
 # ================= LOOP =================
 if __name__ == "__main__":
-    print("🚀 SENSEX EMA5 Bot Started (v2)...")
+    print("🚀 SENSEX EMA5 Bot Started (v3)...")
 
     while True:
         try:
