@@ -10,7 +10,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
-INSTRUMENT_KEY = "BSE_INDEX|SENSEX"   # Confirmed key
+INSTRUMENT_KEY = "BSE_FO|825565"   # Sensex Futures contract
 EMA_PERIOD = 5
 EPSILON = 0.0001
 DEBUG_MODE = False
@@ -65,8 +65,21 @@ def get_latest_candle():
 
     return candles[-(EMA_PERIOD+2):]  # last few candles for EMA
 
+# === LIVE QUOTE CHECK ===
+def get_live_quote():
+    url = f"https://api.upstox.com/v3/quote/instrument/{INSTRUMENT_KEY}"
+    headers = {
+        "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
+        "Accept": "application/json"
+    }
+    r = requests.get(url, headers=headers, timeout=10)
+    if r.status_code != 200:
+        print("⚠ Quote API error:", r.status_code)
+        return None
+    return r.json().get("data", {}).get("last_price")
+
 # === SIGNAL CHECK (SELL only) ===
-def check_signal(candle, ema):
+def check_signal(candle, ema, live_price):
     global last_signal_time
 
     ts = datetime.fromisoformat(candle[0])
@@ -74,14 +87,19 @@ def check_signal(candle, ema):
     low = float(candle[3])
     close = float(candle[4])
 
-    print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} EMA5:{ema:.2f}")
+    # Sanity check: skip if candle close is far from live price
+    if abs(close - live_price) > 500:
+        print(f"⚠ Skipping stale candle (close {close}, live {live_price})")
+        return
+
+    print(f"[{datetime.now(IST).strftime('%H:%M:%S')}] Close:{close:.2f} EMA5:{ema:.2f} Live:{live_price:.2f}")
 
     # SELL condition only
     if low > ema + EPSILON and ts != last_signal_time:
         message = (
             f"🚀 ABOVE 5 EMA SELL Signal\n\n"
             f"Candle Time: {ts.strftime('%Y-%m-%d %H:%M')}\n"
-            f"H:{high} L:{low} C:{close}\nEMA5:{ema:.2f}"
+            f"H:{high} L:{low} C:{close}\nEMA5:{ema:.2f}\nLive:{live_price:.2f}"
         )
         print("✅ SELL Signal detected")
         if not DEBUG_MODE:
@@ -92,18 +110,19 @@ def check_signal(candle, ema):
 
 # === MAIN LOOP ===
 if __name__ == "__main__":
-    print("🚀 SENSEX EMA5 Bot Started (5m candles, SELL only)...")
+    print("🚀 SENSEX Futures EMA5 Bot Started (5m candles, SELL only)...")
 
     while True:
         try:
             candles = get_latest_candle()
-            if candles:
+            live_price = get_live_quote()
+            if candles and live_price:
                 ema = get_ema(candles)
                 latest_candle = candles[-2]  # last closed candle
                 if ema:
-                    check_signal(latest_candle, ema)
+                    check_signal(latest_candle, ema, live_price)
             else:
-                print("⚠ No candle data")
+                print("⚠ No candle or live data")
         except Exception as e:
             print("Main error:", e)
 
